@@ -8,6 +8,7 @@ units: units.tsv
 #fastq_dir: "fastq/"
 working_dir: "temp/"
 result_dir: "results/"
+script_dir: "scripts/"
 
 # samples
 #samples:

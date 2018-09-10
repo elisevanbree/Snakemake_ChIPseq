@@ -14,6 +14,7 @@ configfile: "configs/config_tomato_sub.yaml"
 #FASTQ_DIR = config["fastq_dir"]        # where to find the fastq files
 WORKING_DIR = config["working_dir"]    # where you want to store your intermediate files (this directory will be cleaned up at the end)
 RESULT_DIR = config["result_dir"]      # what you want to keep
+SCRIPT_DIR = config["script_dir"]
 
 GENOME_FASTA_URL = config["refs"]["genome_url"]
 GENOME_FASTA_FILE = os.path.basename(config["refs"]["genome_url"])
@@ -166,7 +167,7 @@ rule align:
         reverseUnpaired = WORKING_DIR + "trimmed/{sample}_{unit}_reverse_unpaired.fastq.gz",
         index = [WORKING_DIR + "genome." + str(i) + ".bt2" for i in range(1,5)]
     output:
-        temp(WORKING_DIR + "mapped/{sample}_{unit}.bam")
+        temp(WORKING_DIR + "mapped/{sample}_{unit}.sam")
     message: "Mapping files"
     params:
         bowtie = " ".join(config["bowtie2"]["params"].values()), #take argument separated as a list separated with a space
@@ -178,7 +179,78 @@ rule align:
         "-x {params.index} "
         "-1 {input.forward} -2 {input.reverse} "
         "-U {input.forwardUnpaired},{input.reverseUnpaired} "   # also takes the reads unpaired due to trimming
-        "| samtools view -Sb - > {output}"                       # to get the output as a BAM file directly
+        "-S {output}"                                           #changed to match the pipeline of cambridge
+
+rule header_sam:
+    input:
+        WORKING_DIR + "mapped/{sample}_{unit}.sam"
+    output:
+        WORKING_DIR + "mapped/{sample}_{unit}_header.sam"
+    message : "Creation of the header for {wildcards.sample}"
+    shell:
+        "sed -n 1,15p {input} > {output}"
+
+rule unique_align:
+    input:
+        WORKING_DIR + "mapped/{sample}_{unit}.sam"
+    output:
+        WORKING_DIR + "mapped/{sample}_{unit}_unique.txt"
+    shell:
+        "samtools view -S -f0x02 {input} "
+        "| grep -v "XS:i:" > {output} "                         # grep -v : look for "XS:i:" which represent multi align read and -v exclude them from the text file
+
+
+rule multi_align:
+    input:
+        WORKING_DIR + "mapped/{sample}_{unit}.sam"
+    output:
+        WORKING_DIR + "mapped/{sample}_{unit}_multi.txt"
+    shell:
+        "samtools view -S -f0x02 {input} "
+        "| grep  "XS:i:" > {output} "
+
+rule python:
+    input:
+        unique = WORKING_DIR + "mapped/{sample}_{unit}_unique.txt"
+        multi  = WORKING_DIR + "mapped/{sample}_{unit}_multi.txt"
+    output:
+        unique = WORKING_DIR + "mapped/{sample}_{unit}_unique.py.txt"
+        multi  = WORKING_DIR + "mapped/{sample}_{unit}_multi.py.txt"
+    script:
+        "scripts/foo.py"
+rule word_count:
+    input:
+        WORKING_DIR + "mapped/{sample}_{unit}_multi.py.txt"
+    output:
+        WORKING_DIR + "mapped/{sample}_{unit}_multi.py.stats"
+    shell:
+        "wc -l {input} >> {output}"
+
+rule multi_to_unique:
+    input:
+        txt   = WORKING_DIR + "mapped/{sample}_{unit}_multi.py.txt"
+        stats = WORKING_DIR + "mapped/{sample}_{unit}_multi.py.stats"
+    output:
+        txt   = WORKING_DIR + "mapped/{sample}_{unit}_multi.to.unique.txt"
+        RDATA = WORKING_DIR + "mapped/{sample}_{unit}_MU.RData"
+    script:
+        "scripts/multi_unique_extract.r {input.txt} {input.stats} {output.RDATA} {output.txt}  15 20000 21 16"
+
+
+rule txt_to_sam:
+    input:
+    output:
+    shell:
+
+rule sam_to_bam:
+    input:
+    output:
+    shell:
+
+rule merge_bam:
+    input:
+    output:
+    shell:
 
 rule sort:
     input:
