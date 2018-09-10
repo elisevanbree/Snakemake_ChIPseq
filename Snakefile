@@ -67,6 +67,7 @@ BIGWIG = expand(RESULT_DIR + "bigwig/{sample}_{unit}.bw", sample=SAMPLES,unit=UN
 BAM_COMPARE = expand(RESULT_DIR + "bamcompare/log2_{treatment}_{control}_{unit}.bamcompare.bw", zip, treatment = CASES, control = CONTROLS,unit=UNITS) #add zip function in the expand to compare respective treatment and control
 BED_NARROW = expand(RESULT_DIR + "bed/{treatment}_vs_{control}_{unit}_peaks.narrowPeak", zip, treatment = CASES, control = CONTROLS,unit=UNITS)
 BED_BROAD = expand(RESULT_DIR + "bed/{treatment}_vs_{control}_{unit}_peaks.broadPeak", zip, treatment = CASES, control = CONTROLS,unit=UNITS)
+UNIQUE = expand(RESULT_DIR + "mapped/{sample}_{unit}_both.bam", sample=SAMPLES,unit=UNITS)
 ################
 # Final output
 ################
@@ -195,9 +196,10 @@ rule unique_align:
         WORKING_DIR + "mapped/{sample}_{unit}.sam"
     output:
         WORKING_DIR + "mapped/{sample}_{unit}_unique.txt"
+    params:
+        i = "XS:i:"
     shell:
-        "samtools view -S -f0x02 {input} "
-        "| grep -v "XS:i:" > {output} "                         # grep -v : look for "XS:i:" which represent multi align read and -v exclude them from the text file
+        "samtools view -S -f0x02 {input} | grep -v {params.i} > {output} "                         # grep -v : look for "XS:i:" which represent multi align read and -v exclude them from the text file
 
 
 rule multi_align:
@@ -205,16 +207,18 @@ rule multi_align:
         WORKING_DIR + "mapped/{sample}_{unit}.sam"
     output:
         WORKING_DIR + "mapped/{sample}_{unit}_multi.txt"
+    params:
+        i = "XS:i:"
     shell:
         "samtools view -S -f0x02 {input} "
-        "| grep  "XS:i:" > {output} "
+        "| grep  {params.i} > {output} "
 
 rule python:
     input:
-        unique = WORKING_DIR + "mapped/{sample}_{unit}_unique.txt"
+        unique = WORKING_DIR + "mapped/{sample}_{unit}_unique.txt",
         multi  = WORKING_DIR + "mapped/{sample}_{unit}_multi.txt"
     output:
-        unique = WORKING_DIR + "mapped/{sample}_{unit}_unique.py.txt"
+        unique = WORKING_DIR + "mapped/{sample}_{unit}_unique.py.txt",
         multi  = WORKING_DIR + "mapped/{sample}_{unit}_multi.py.txt"
     script:
         "scripts/foo.py"
@@ -228,10 +232,10 @@ rule word_count:
 
 rule multi_to_unique:
     input:
-        txt   = WORKING_DIR + "mapped/{sample}_{unit}_multi.py.txt"
+        txt   = WORKING_DIR + "mapped/{sample}_{unit}_multi.py.txt",
         stats = WORKING_DIR + "mapped/{sample}_{unit}_multi.py.stats"
     output:
-        txt   = WORKING_DIR + "mapped/{sample}_{unit}_multi.to.unique.txt"
+        txt   = WORKING_DIR + "mapped/{sample}_{unit}_multi.to.unique.txt",
         RDATA = WORKING_DIR + "mapped/{sample}_{unit}_MU.RData"
     script:
         "scripts/multi_unique_extract.r {input.txt} {input.stats} {output.RDATA} {output.txt}  15 20000 21 16"
@@ -239,22 +243,42 @@ rule multi_to_unique:
 
 rule txt_to_sam:
     input:
+        HEADER = WORKING_DIR + "mapped/{sample}_{unit}_header.sam",
+        unique = WORKING_DIR + "mapped/{sample}_{unit}_unique.txt",
+        multi  = WORKING_DIR + "mapped/{sample}_{unit}_multi.to.unique.txt"
     output:
+        unique = WORKING_DIR + "mapped/{sample}_{unit}_unique.sam",
+        multi  = WORKING_DIR + "mapped/{sample}_{unit}_multi.to.unique.sam"
     shell:
+        """
+        cat {input.HEADER} {input.unique} > {output.unique}
+        cat {input.HEADER} {input.multi} > {output.multi}
+        """
 
 rule sam_to_bam:
     input:
+        unique = WORKING_DIR + "mapped/{sample}_{unit}_unique.sam",
+        multi  = WORKING_DIR + "mapped/{sample}_{unit}_multi.to.unique.sam"
     output:
+        unique = WORKING_DIR + "mapped/{sample}_{unit}_unique.bam",
+        multi  = WORKING_DIR + "mapped/{sample}_{unit}_multi.to.unique.bam"
     shell:
-
+        """
+        samtools view -bS -o {output.unique} {input.unique}
+        samtools view -bS -o {output.multi} {input.multi}
+        """
 rule merge_bam:
     input:
+        unique = WORKING_DIR + "mapped/{sample}_{unit}_unique.bam",
+        multi  = WORKING_DIR + "mapped/{sample}_{unit}_multi.to.unique.bam"
     output:
+        RESULT_DIR + "mapped/{sample}_{unit}_both.bam"
     shell:
+        "samtools merge {input.unique} {input.multi} {output}"
 
 rule sort:
     input:
-        WORKING_DIR + "mapped/{sample}_{unit}.bam"
+        RESULT_DIR + "mapped/{sample}_{unit}_both.bam"
     output:
         RESULT_DIR + "mapped/{sample}_{unit}.sorted.bam"
     message:"sorting {wildcards.sample} bam file"
